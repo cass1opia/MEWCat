@@ -566,6 +566,16 @@ namespace PHASED_LOCAL_SEARCH
             U[i]=false;
         }
 
+        // if the whole graph is already a clique there is no vertex outside
+        // the clique to restart from; avoid spinning forever
+        if(clique_size>=n)
+        {
+            c0size=0;
+            c1size=0;
+            c1andUsize=0;
+            return;
+        }
+
         // select a new vertex to add to clique
         int v_new = (int)( rand() * ((n-1) + 1.0) / (1.0 + RAND_MAX) );
 

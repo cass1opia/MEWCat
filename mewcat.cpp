@@ -8,12 +8,15 @@
 #include <vector>
 #include <algorithm>
 
+#include "mewcat_solver.h"
 #include "phased_local_search.h"
 #include "phased_local_search_adjlist.h"
 #include "phased_local_search_adjmatrix.h"
 #include "weighted_graph.h"
 
 using namespace std;
+
+static bool mewcat_verbose = false;
 
 class Solver {
    public:
@@ -33,6 +36,8 @@ class Solver {
     int **edge_weight;
 
     clock_t start_time;
+    double time_limit_sec;
+    bool timed_out;
 
     int *clique;
     int clique_size;
@@ -290,6 +295,14 @@ class Solver {
     }
 
     void search(int *set, int set_size, int *pseudo_vertex_weight) {
+        if (time_limit_sec > 0) {
+            double elapsed = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+            if (elapsed >= time_limit_sec) {
+                timed_out = true;
+                return;
+            }
+        }
+
         branch_count++;
 
         if (set_size == 0) {
@@ -298,8 +311,10 @@ class Solver {
                        sizeof(int) * clique_size);
                 maximum_weight_clique_size = clique_size;
                 maximum_weight_clique_weight = clique_weight;
-                printf("node: %lu, size: %d, weight: %d\n", branch_count,
-                       clique_size, clique_weight);
+                if (mewcat_verbose) {
+                    printf("node: %lu, size: %d, weight: %d\n", branch_count,
+                           clique_size, clique_weight);
+                }
             }
             return;
         }
@@ -364,6 +379,8 @@ class Solver {
         int set2_size = 0;
         int *pseudo_vertex_weight2 = new int[set_size];
         for (int i : B) {
+            if (timed_out) break;
+
             int vi = set[i];
 
             clique[clique_size++] = vi;
@@ -395,7 +412,8 @@ class Solver {
     }
 
     Solver(weighted_graph *graph, int *initial_clique = NULL,
-           int initial_clique_size = 0, int initial_clique_weight = 0) {
+           int initial_clique_size = 0, int initial_clique_weight = 0,
+           double time_limit_sec = -1.0) {
         start_time = clock();
 
         n = graph->n;
@@ -405,6 +423,9 @@ class Solver {
 
         edge_weight = graph->edge_weight;
         average_degree = (2 * m) / n;
+
+        this->time_limit_sec = time_limit_sec;
+        timed_out = false;
 
         branch_count = 0;
         internal_count = 0;
@@ -455,32 +476,28 @@ class Solver {
     ~Solver() { delete[] maximum_weight_clique; }
 };
 
-int main(int argc, char **argv) {
-    if (argc != 2) {
-        cout << "usage: " << argv[0] << " <dataset>" << endl;
-        return 0;
-    }
-
-    printf("dataset: %s\n", argv[1]);
-    weighted_graph *graph = new weighted_graph((char *)argv[1]);
+MewcpResult solve_mewcp(weighted_graph *graph, int pls_iterations, bool verbose, double time_limit_sec) {
+    mewcat_verbose = verbose;
 
     int n = graph->n;
     int m = graph->m;
-    double density = 2.0 * m / ((long)n * (n - 1));
-    printf("n: %d, m: %d, density: %f\n", n, m, density);
 
     int *initial_clique = NULL;
     int initial_clique_size = 0;
     int initial_clique_weight = 0;
     double pls_time_sec = 0;
 
-    int pls_iteration = 10;
-    if (pls_iteration > 0) {
+    if (verbose) {
+        double density = (n > 1) ? 2.0 * m / ((long)n * (n - 1)) : 0.0;
+        printf("n: %d, m: %d, density: %f\n", n, m, density);
+    }
+
+    if (pls_iterations > 0 && n > 1) {
         using namespace PHASED_LOCAL_SEARCH;
-        double edge_density = ((double)graph->m / (n * (n - 1) / 2));
+        double edge_density = ((double)m / ((double)n * (n - 1) / 2));
         if (edge_density < 0.5) {
             phased_local_search *pls = new phased_local_search_adjlist(graph);
-            pls->search(pls_iteration);
+            pls->search(pls_iterations);
 
             initial_clique = new int[pls->best_clique_size];
             memcpy(initial_clique, pls->best_clique,
@@ -494,7 +511,7 @@ int main(int argc, char **argv) {
         } else {
             graph->create_nonadjlist();
             phased_local_search *pls = new phased_local_search_adjmatrix(graph);
-            pls->search(pls_iteration);
+            pls->search(pls_iterations);
 
             initial_clique = new int[pls->best_clique_size];
             memcpy(initial_clique, pls->best_clique,
@@ -509,33 +526,62 @@ int main(int argc, char **argv) {
         }
     }
 
-    printf("PLS time: %.2f\n", pls_time_sec);
-    printf("lb: %d\n", initial_clique_weight);
-    assert(graph->is_clique(initial_clique, initial_clique_size,
-                            initial_clique_weight));
+    if (verbose) {
+        printf("PLS time: %.2f\n", pls_time_sec);
+        printf("lb: %d\n", initial_clique_weight);
+        assert(graph->is_clique(initial_clique, initial_clique_size,
+                                initial_clique_weight));
+        fflush(stdout);
+    }
 
-    fflush(stdout);
+    double solver_time_limit = time_limit_sec > 0
+        ? time_limit_sec - pls_time_sec
+        : -1.0;
     Solver *clq = new Solver(graph, initial_clique, initial_clique_size,
-                             initial_clique_weight);
-    assert(graph->is_clique(clq->maximum_weight_clique,
-                            clq->maximum_weight_clique_size,
-                            clq->maximum_weight_clique_weight));
+                             initial_clique_weight, solver_time_limit);
 
-    printf("search time: %.2f\n", clq->elapsed_time_sec);
-    printf("node explored: %ld\n", clq->branch_count);
-    printf("internal node: %ld\n", clq->internal_count);
-    printf("total time: %.2f\n", clq->elapsed_time_sec + pls_time_sec);
-    printf("opt: %d\n", clq->maximum_weight_clique_weight);
+    MewcpResult result;
+    result.vertices.assign(
+        clq->maximum_weight_clique,
+        clq->maximum_weight_clique + clq->maximum_weight_clique_size);
+    result.weight = clq->maximum_weight_clique_weight;
+    result.branch_count = clq->branch_count;
+    result.elapsed_time_sec = clq->elapsed_time_sec;
+    result.timed_out = clq->timed_out;
 
-    // printf("The maximum weight clique has %d vertices,\n [",
-    //        clq->maximum_weight_clique_size);
-    // for (int i = 0; i < clq->maximum_weight_clique_size; ++i) {
-    //     printf(" %d", clq->maximum_weight_clique[i] + 1);
-    // }
-    // printf(" ]\n");
+    if (verbose) {
+        assert(graph->is_clique(clq->maximum_weight_clique,
+                                clq->maximum_weight_clique_size,
+                                clq->maximum_weight_clique_weight));
+        printf("search time: %.2f\n", clq->elapsed_time_sec);
+        printf("node explored: %ld\n", clq->branch_count);
+        printf("internal node: %ld\n", clq->internal_count);
+        printf("total time: %.2f\n", clq->elapsed_time_sec + pls_time_sec);
+        printf("opt: %d\n", clq->maximum_weight_clique_weight);
+    }
 
     delete[] initial_clique;
     delete clq;
+
+    return result;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 2 || argc > 3) {
+        cout << "usage: " << argv[0] << " <dataset> [time_limit_sec]" << endl;
+        return 0;
+    }
+
+    double time_limit_sec = argc == 3 ? atof(argv[2]) : -1.0;
+
+    printf("dataset: %s\n", argv[1]);
+    weighted_graph *graph = new weighted_graph((char *)argv[1]);
+
+    MewcpResult result = solve_mewcp(graph, 10, true, time_limit_sec);
+    if (result.timed_out) {
+        printf("search terminated by time limit (best solution so far returned)\n");
+    }
+
     delete graph;
     return 0;
 }

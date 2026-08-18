@@ -24,6 +24,8 @@
 #define weighted_graph_h
 
 #include <limits>
+#include <vector>
+#include <tuple>
 
 #define NOT_ADJACENT (std::numeric_limits<int>::min()) /* vertices are not adjacent if edge_weight is this value */
 
@@ -40,6 +42,7 @@ class weighted_graph
         int* vertex_weight;
 
         weighted_graph(char *inFile);
+        weighted_graph(int num_vertices, const std::vector<std::tuple<int,int,int>>& edges);
         ~weighted_graph();
         bool is_clique(int* clique, int clique_size,int clique_weight);
 

@@ -162,6 +162,77 @@ weighted_graph::weighted_graph(char *inFile)
     }
 }
 
+weighted_graph::weighted_graph(int num_vertices, const std::vector<std::tuple<int,int,int>>& edges)
+{
+    n = num_vertices;
+    m = 0;
+    degree = NULL;
+    edge_weight = NULL;
+    nonadjacency_list = NULL;
+    adjacency_list = NULL;
+    edge_weight_list = NULL;
+    vertex_weight = NULL;
+
+    vertex_weight = new int[n+1];
+    degree = new int[n+1];
+    for(int i=0;i<n;i++)
+    {
+        vertex_weight[i]=0;
+        degree[i]=0;
+    }
+    vertex_weight[n]=0; //dummy vertex
+    degree[n]=0; //dummy vertex
+
+    edge_weight = new int*[n];
+    for(int i=0;i<n;i++)
+    {
+        edge_weight[i]=new int[n];
+        for(int j=0;j<n;j++)
+        {
+            edge_weight[i][j]=NOT_ADJACENT;
+        }
+    }
+
+    for(const auto& e : edges)
+    {
+        int v1 = std::get<0>(e);
+        int v2 = std::get<1>(e);
+        int w  = std::get<2>(e);
+        if(v1<0 || v1>=n || v2<0 || v2>=n) continue; // ignore out-of-range
+        if(v1==v2) continue;                         // ignore self-loops
+        if(edge_weight[v1][v2]==NOT_ADJACENT)
+        {
+            degree[v1]++;
+            degree[v2]++;
+            m++;
+        }
+        edge_weight[v1][v2]=w;
+        edge_weight[v2][v1]=w;
+    }
+
+    adjacency_list=new int*[n];
+    edge_weight_list=new int*[n];
+    for(int i=0; i<n; i++)
+    {
+        int *ewi=edge_weight[i];
+        int di=degree[i];
+        adjacency_list[i]=new int[di];
+        edge_weight_list[i]=new int[di];
+        int *adji=adjacency_list[i];
+        int *ewli=edge_weight_list[i];
+        int k=0;
+        for(int j=0; j<n; j++)
+        {
+            if(ewi[j]!=NOT_ADJACENT)
+            {
+                adji[k]=j;
+                ewli[k]=ewi[j];
+                k++;
+            }
+        }
+    }
+}
+
 weighted_graph::~weighted_graph()
 {
     delete[] degree;
